@@ -20,7 +20,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 echo
 echo "======================================"
-echo "Walert BM25 retrieval reproduction"
+echo "Walert retrieval reproduction"
 echo "======================================"
 echo
 
@@ -33,7 +33,7 @@ echo
 #   target/repro/prepared/bm25/collection.jsonl
 #   target/repro/prepared/qrels.txt
 #
-echo "1/4 Preparing retrieval data..."
+echo "1/7 Preparing retrieval data..."
 python "${SCRIPT_DIR}/data.py" bm25
 
 
@@ -45,43 +45,99 @@ python "${SCRIPT_DIR}/data.py" bm25
 #   target/repro/indexes/bm25/
 #
 echo
-echo "2/4 Building BM25 index..."
+echo "2/7 Building BM25 index..."
 bash "${SCRIPT_DIR}/index-bm25.sh"
 
+# ---------------------------------------------------------------------------
+# 3. Encode passages for dense retrieval
+# ---------------------------------------------------------------------------
+#
+# Unlike BM25, dense retrieval first turns every passage into a vector.
+#
+# Creates:
+#   target/repro/embeddings/tct_colbert-v2-hnp-msmarco/
+#
+
+echo
+echo "3/7 Encoding passages for dense retrieval..."
+bash "${SCRIPT_DIR}/encode.sh"
 
 # ---------------------------------------------------------------------------
-# 3. Search all Walert evaluation questions
+# 4. Build the dense FAISS index
+# ---------------------------------------------------------------------------
+#
+# Takes the passage vectors from encode.sh and makes them searchable.
+#
+# Creates:
+#   target/repro/indexes/tct_colbert-v2-hnp-msmarco-faiss/
+#
+
+echo
+echo "4/7 Building dense FAISS index..."
+bash "${SCRIPT_DIR}/index.sh"
+
+# ---------------------------------------------------------------------------
+# 5. Search all Walert evaluation questions
 # ---------------------------------------------------------------------------
 #
 # Creates:
 #   target/repro/runs/rag-bm25.txt
 #
 echo
-echo "3/4 Running BM25 retrieval..."
+echo "5/7 Running BM25 retrieval..."
 python "${SCRIPT_DIR}/search.py" bm25
+
+# ---------------------------------------------------------------------------
+# 6. Search all Walert evaluation questions with dense retrieval
+# ---------------------------------------------------------------------------
+#
+# search.py encodes each question with the released DPR query encoder
+# and searches the dense index we rebuilt above.
+#
+# Creates:
+#   target/repro/runs/rag-dense-faiss.txt
+#
+
+echo
+echo "6/7 Running dense retrieval..."
+python "${SCRIPT_DIR}/search.py" dense
 
 
 # ---------------------------------------------------------------------------
-# 4. Evaluate retrieval quality
+# 7. Evaluate retrieval quality
 # ---------------------------------------------------------------------------
 
 QRELS="${ROOT_DIR}/target/repro/prepared/qrels.txt"
 BM25_RUN="${ROOT_DIR}/target/repro/runs/rag-bm25.txt"
+DENSE_RUN="${ROOT_DIR}/target/repro/runs/rag-dense-faiss.txt"
 
 echo
-echo "4/4 Evaluating Known questions..."
+echo "7/7 Evaluating BM25 on Known questions..."
 python "${SCRIPT_DIR}/eval.py" \
     known \
     "${QRELS}" \
     "${BM25_RUN}"
 
 echo
-echo "Evaluating Inferred questions..."
+echo "Evaluating BM25 on Inferred questions..."
 python "${SCRIPT_DIR}/eval.py" \
     inferred \
     "${QRELS}" \
     "${BM25_RUN}"
 
+echo
+echo "Evaluating dense retrieval on Known questions..."
+python "${SCRIPT_DIR}/eval.py" \
+    known \
+    "${QRELS}" \
+    "${DENSE_RUN}"
 
 echo
-echo "BM25 pipeline complete."
+echo "Evaluating dense retrieval on Inferred questions..."
+python "${SCRIPT_DIR}/eval.py" \
+    inferred \
+    "${QRELS}" \
+    "${DENSE_RUN}"
+
+echo
+echo "Walert retrieval pipeline complete c:"

@@ -19,16 +19,15 @@ TOPICS = DATA_DIR / "topics.csv"
 # Retrieval locations
 # ---------------------------------------------------------------------------
 
-BM25_INDEX = TARGET_DIR / "indexes" / "bm25"
+# Search the index that Walert rebuilt itself rather than relying on
+# the pre-generated index shipped with the repository.
+BM25_INDEX = (TARGET_DIR/ "repro"/ "indexes"/ "bm25")
 BM25_OUTPUT = TARGET_DIR / "repro" /  "runs" / "rag-bm25.txt"
 
-DENSE_INDEX = (
-    TARGET_DIR
-    / "indexes"
-    / "tct_colbert-v2-hnp-msmarco-faiss"
-)
+# Dense searches should also use the index rebuilt by encode.sh + index.sh.
+DENSE_INDEX = (TARGET_DIR/ "repro"/ "indexes"/ "tct_colbert-v2-hnp-msmarco-faiss")
 
-DENSE_OUTPUT = TARGET_DIR / "runs" / "rag-dense-faiss.txt"
+DENSE_OUTPUT = (TARGET_DIR/ "repro"/ "runs"/ "rag-dense-faiss.txt")
 
 # NOTE:
 # The released Walert code uses this DPR query encoder against a dense
