@@ -1214,6 +1214,7 @@ sb.add_request_handler(PersonalityIntentHandler())
 sb.add_request_handler(AutoLearnIntentHandler())
 sb.add_request_handler(SummaryIntentHandler())
 sb.add_request_handler(ComparisonBachelorAssociateIntentHandler())
+sb.add_request_handler(CoursesIntentHandler())
 
 sb.add_request_handler(IntentReflectorHandler()) # make sure IntentReflectorHandler is last so it doesn't override your custom intent handlers
 
