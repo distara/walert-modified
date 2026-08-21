@@ -1,14 +1,38 @@
+import argparse
+from pathlib import Path
 import pandas as pd
 
-DATA_DIR = "../../data"
+# Find quantitative_eval from this file's actual location.
+#
+# This means data.py works whether we run it from:
+#   quantitative_eval/
+# or:
+#   quantitative_eval/src/retrieval/
+#
+ROOT = Path(__file__).resolve().parents[2]
 
-COLLECTION = DATA_DIR + "/collection.csv"
-TOPICS = DATA_DIR + "/topics.csv"
-GROUNDTRUTH = DATA_DIR + "/groundtruth.csv"
-INTENT_MAPPING = DATA_DIR + "/intent_mapping.csv"
-WALERT_INTENT = DATA_DIR + "/walert_intent_results.csv"
+DATA_DIR = ROOT / "data"
+TARGET_DIR = ROOT / "target"
 
-OUTPUT_PATH = '../../target/runs/walert-intent.txt'
+COLLECTION = DATA_DIR / "collection.csv"
+TOPICS = DATA_DIR / "topics.csv"
+GROUNDTRUTH = DATA_DIR / "groundtruth.csv"
+INTENT_MAPPING = DATA_DIR / "intent_mapping.csv"
+WALERT_INTENT = DATA_DIR / "walert_intent_results.csv"
+
+
+# Generated reproduction files live separately from the authors'
+# supplied reference outputs.
+REPRO_DIR = TARGET_DIR / "repro"
+
+PREPARED_DIR = REPRO_DIR / "prepared"
+
+QRELS_OUTPUT = PREPARED_DIR / "qrels.txt"
+
+BM25_COLLECTION_DIR = PREPARED_DIR / "bm25"
+COLLECTION_OUTPUT = BM25_COLLECTION_DIR / "collection.jsonl"
+
+INTENT_RUN_OUTPUT = REPRO_DIR / "runs" / "walert-intent.txt"
 
 # PURPOSE:
 # Prepare files used by the retrieval experiments.
@@ -36,13 +60,31 @@ def create_qrels(topics_filename, groundtruth_filename):
 
     qrels=data[['question_id', 'subtopic', 'passage_id', 'relevance_judgment']]
     print(qrels.head())
-    qrels.to_csv(DATA_DIR + "/qrels.txt", sep='\t', index=False, header=False)
+   
+    QRELS_OUTPUT.parent.mkdir( parents=True, exist_ok=True, )
 
+    qrels.to_csv(QRELS_OUTPUT,sep="\t",index=False, header=False, )
+    print(f"Created qrels: {QRELS_OUTPUT}")
 
 def create_pyserini_collection(collection_filename):
-     collection = pd.read_csv(collection_filename)
-     collection.columns = ['id', 'contents']
-     collection.to_json(DATA_DIR + "/collection.jsonl", orient='records', lines=True)   
+    """
+    Convert Walert's FAQ collection into the JSONL format
+    expected by Pyserini/Lucene.
+
+    This changes the file format, not the knowledge itself c:
+    """
+
+    collection = pd.read_csv(collection_filename)
+
+    collection.columns = ["id","contents"]
+
+    BM25_COLLECTION_DIR.mkdir(parents=True,exist_ok=True)
+
+    collection.to_json(COLLECTION_OUTPUT,orient="records",lines=True)
+
+    print(
+        f"Created Pyserini collection: {COLLECTION_OUTPUT}"
+    )
 
 def create_topics_msmarco_format(topics_filename):
     topics = pd.read_csv(topics_filename)  
@@ -101,19 +143,39 @@ def parse_walert_run(topics_filename, groundtruth_filename, walert_filename, int
                 output_writer.write(line)
 
 
+def main():
+    """
+    Choose which Walert data-preparation job to run.
+    (e.g. python data.py bm25 -> prepares the files needed for BM25,
+          python data.py qrels ->  prepares only qrels.txt,
+          python data.py collection -> prepares only collection.jsonl
+    """
 
-    
-    
-    
-    
+    parser = argparse.ArgumentParser(
+        description="Prepare Walert retrieval data."
+    )
 
-#TODO: Create main funcion with argparse
+    parser.add_argument(
+        "task",
+        choices=["bm25", "qrels", "collection"],
+        help="Which preparation task to run.",
+    )
+
+    args = parser.parse_args()
+
+    if args.task == "bm25":
+        create_qrels(TOPICS, GROUNDTRUTH,)
+        create_pyserini_collection(COLLECTION,)
+
+    elif args.task == "qrels":
+        create_qrels(TOPICS, GROUNDTRUTH,)
+
+    elif args.task == "collection":
+        create_pyserini_collection(COLLECTION,)
+
+
 if __name__ == "__main__":
-    create_qrels(TOPICS, GROUNDTRUTH)
-    create_pyserini_collection(COLLECTION)
-    parse_walert_run(TOPICS, GROUNDTRUTH, WALERT_INTENT, INTENT_MAPPING,COLLECTION)
-
-
+    main()
 
 
 #   create_topics_msmarco_format(TOPICS)
