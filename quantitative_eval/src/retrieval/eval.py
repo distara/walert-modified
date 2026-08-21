@@ -12,7 +12,7 @@ import argparse
 import sys
 
 import pandas as pd
-from ranx import Qrels, Run, compare
+from ranx import Qrels, Run, compare, evaluate
 
 
 KNOWN_TOPICS = {
@@ -115,26 +115,46 @@ def main():
         for path in args.runs
     ]
 
-    report = compare(
-        qrels=qrels,
-        runs=runs,
-        metrics=[
-            "ndcg@1",
-            "ndcg@3",
-            "ndcg@5",
-        ],
-        max_p=0.01,
-        make_comparable=True,
-        stat_test="tukey",
-        rounding_digits=4,
-    )
+    metrics = ["ndcg@1", "ndcg@3", "ndcg@5",]
 
     print(f"{args.topic_set.capitalize()} Topics")
-    print(report)
+    
 
-    # Keep the original Walert LaTeX-output behavior.
-    print(report.to_latex())
-
-
+    if len(runs) == 1:
+        # The run contains all 106 Walert questions, while qrels have been
+	# filtered to only Known or Inferred questions.
+	# make_comparable = True tells ranx to evaluate only question IDs relevant to the subset
+        scores = evaluate(
+            qrels,
+            runs[0],
+            metrics,
+	    make_comparable=True,
+        )
+    
+        print(f"Model: {runs[0].name}")
+    
+        for metric in metrics:
+            print(f"{metric.upper():8} {scores[metric]:.4f}")
+    
+    
+    # If two or more systems are supplied, compare them and perform the
+    # statistical significance test used in the original Walert evaluation.
+    else:
+        report = compare(
+            qrels=qrels,
+            runs=runs,
+            metrics=metrics,
+            max_p=0.01,
+            make_comparable=True,
+            stat_test="tukey",
+            rounding_digits=4,
+        )
+    
+        print(report)
+    
+        # The original Walert evaluation also produced a LaTeX table.
+        print(report.to_latex())
+    
+    
 if __name__ == "__main__":
     sys.exit(main())

@@ -10,6 +10,19 @@ WALERT_INTENT = DATA_DIR + "/walert_intent_results.csv"
 
 OUTPUT_PATH = '../../target/runs/walert-intent.txt'
 
+# PURPOSE:
+# Prepare files used by the retrieval experiments.
+#
+# Note that this script does not perform retrieval and does not run Falcon.
+#
+# Its main jobs are:
+#   1. Convert collection.csv into Pyserini JSONL.
+#   2. Convert topic/ground-truth mappings into qrels.txt.
+#   3. Convert intent-system results into a TREC retrieval run.
+#
+# also note that in the cleaned Walert workflow, these responsibilities will be exposed
+# through ./walert prepare rather than requiring this file to be run c: 
+
 
 def create_qrels(topics_filename, groundtruth_filename):
     topics = pd.read_csv(topics_filename)

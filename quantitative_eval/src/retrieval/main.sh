@@ -1,3 +1,12 @@
+# ORIGINAL WALERT RESEARCH PIPELINE
+#
+# This file came from the released Walert research code.
+# It shows the authors' intended order:
+#
+# data.py -> encode/index -> search.py -> eval.py
+
+
+
 ##1. Parse test collection:
 #python data.py
 

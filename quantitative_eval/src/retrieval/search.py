@@ -22,6 +22,18 @@ RUN="bm25"
 INDEX_BM25="../../target/indexes/bm25"
 OUTPUT_PATH_BM25 = '../../target/runs/rag-bm25.txt'
 
+# PURP0SE:
+# Run retrieval over every question in topics.csv and save the rankings
+#
+# WARNING:
+# This contains both dense and BM25 configuration in the
+# same file. RUN is first set to "dense-faiss" and then overwritten with
+# "bm25", so the released file effectively selects BM25.
+#
+# It also constructs the dense FaissSearcher before checking whether BM25
+# was selected. We are keeping this file for reference while moving these
+# choices into explicit commands such as:
+#     ./walert search bm25
 
 topics = pd.read_csv(TOPICS)
 

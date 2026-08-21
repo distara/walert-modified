@@ -20,3 +20,6 @@ env/
 # Logs/temp
 *.log
 *.tmp
+
+# Generated Walert reproduction artifacts
+target/repro/
