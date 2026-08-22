@@ -107,3 +107,8 @@ weasel==0.3.2
 wheel==0.37.1
 zipp==3.17.0
 zlib-state==0.1.6
+
+rouge==1.0.1
+
+bert-score==0.3.13
+nltk==3.9.4
