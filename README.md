@@ -33,6 +33,18 @@ The NLG evaluation uses NLTK tokenization for BLEU. Download the required tokeni
 python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 ```
 
+The end-to-end statistical evaluation is implemented in R and requires `dplyr`:
+
+```bash
+conda install -c conda-forge r-base r-dplyr
+```
+
+Run the statistical evaluation from the `quantitative_eval` directory:
+
+```bash
+(cd src/nlg && Rscript end2end_eval.R)
+```
+
 # Evaluation Results
 NDCG for Known and Inferred Questions
 ![NDCG](Evaluation_results/1.png)
