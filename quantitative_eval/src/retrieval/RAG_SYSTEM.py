@@ -1,21 +1,13 @@
-import sounddevice as sd
-from scipy.io.wavfile import write
-import threading
-from pydub import AudioSegment
-import numpy as np
-import whisper
-import os
-from pyserini.search import FaissSearcher
+from pathlib import Path
+import argparse
+import logging
+
 import pandas as pd
+from pyserini.search.faiss import FaissSearcher
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import transformers
 import torch
-from gtts import gTTS
-from pydub import AudioSegment
-import pygame
-import time
-import os
-import logging
 
 logging.basicConfig(filename='voice_assistant.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -61,8 +53,6 @@ def get_answer(text):
 
 
 def load_model(model_id):
-    model_id = "tiiuae/falcon-7b-instruct"
-
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
 
@@ -77,42 +67,180 @@ def load_model(model_id):
     return pipeline, tokenizer
 
 
-model_name = "tiiuae/falcon-7b-instruct"
-PIPELINE, TOKENIZER = load_model(model_name)
+MODEL_NAME = "tiiuae/falcon-7b-instruct"
 
-DATA_DIR = "../../data"
+# Practical local generator for Apple Silicon.
+#
+# The released research system used Falcon-7B-Instruct above.
+# This smaller (baby) 4-bit model lets Walert actually run locally on a M4 Mac
+LOCAL_MODEL_NAME = (
+    "mlx-community/Llama-3.2-3B-Instruct-4bit"
+)
 
-COLLECTION = DATA_DIR + "/collection.csv"
-TOPICS = DATA_DIR + "/topics.csv"
-GROUNDTRUTH = DATA_DIR + "/groundtruth.csv"
+# Load Falcon only when generation is actually needed.
+# Importing this file should not immediately allocate a huge language model.
+PIPELINE = None
+TOKENIZER = None
+
+# Locate quantitative_eval from this file
+ROOT = Path(__file__).resolve().parents[2]
+
+DATA_DIR = ROOT / "data"
+
+COLLECTION = DATA_DIR / "collection.csv"
+TOPICS = DATA_DIR / "topics.csv"
+GROUNDTRUTH = DATA_DIR / "groundtruth.csv"
 
 # Dense Retrieval
-INDEX = "../../target/indexes/tct_colbert-v2-hnp-msmarco-faiss"
+INDEX = (ROOT/ "target"/ "repro"/ "indexes"/ "tct_colbert-v2-hnp-msmarco-faiss")
 QUERY_ENCODER = 'facebook/dpr-question_encoder-multiset-base'
+# This is intentionally NOT an Out-of-KB classifier.
+#
+# All 106 Walert evaluation questions scored at least about 67.10
+# with this reproduced dense retriever. A much lower score therefore
+# indicates a question that is clearly far outside Walert's domain.
+#
+# This catches obvious cases such as "What is the capital of France?"
+# without rejecting legitimate Walert questions.
+OBVIOUSLY_OFF_DOMAIN_SCORE = 66.0
+
+
 OUTPUT_PATH = '../../target/runs/rag-dense-faiss.txt'
 RUN = "dense-faiss"
 
 searcher = FaissSearcher(
-    INDEX,
-    QUERY_ENCODER
+    str(INDEX),
+    QUERY_ENCODER,
 )
 
-def get_context_passages(question):
+def get_context_passages( question, return_score=False):
+    """
+    Retrieve Walert's top three passages.
+
+    The optional score is useful for detecting questions that are
+    obviously far outside Walert's knowledge-base domain.
+    """
     num_hits = 10
     hits = searcher.search(question, num_hits)
     top_K = 3
+
     collection_df = pd.read_csv(COLLECTION)
     context_passages = []
+
     for d in hits[:top_K]:
-        temp_passage = list(collection_df[collection_df['passage_id'] == d.docid]['passage'])[0]
+        temp_passage = list(
+            collection_df[collection_df["passage_id"] == d.docid]["passage"])[0]
+
         context_passages.append(temp_passage)
+
+    if return_score:
+        return (context_passages,hits[0].score)
+
     return context_passages
+
+def build_prompt(question, context):
+    """
+    Build the Top-3 prompt used by the released Walert system.
+
+    Keeping prompt creation separate means we can inspect and test the
+    RAG pipeline without yet loading the large Falcon model.
+    """
+
+    static_prompt = (
+    "Answer the following question using only the retrieved documents. "
+    "Do not use outside knowledge. "
+    "Give a direct, concise answer suitable for a virtual assistant. "
+    "Do not mention the retrieved documents, the prompt, or that the answer "
+    "was synthesized. "
+    "Add one emoticon from this list: "
+    "(>w<, >x<, >.<, TwT, ;-;, T~T, >…<, ^.^, •_•, :p) "
+    "to the very end of the answer. "
+    "If the retrieved documents do not contain enough information to answer "
+    "the question, output exactly NA and nothing else."
+)
+
+    prompt = (
+        static_prompt
+        + "\n Question: " + question
+        + "\n Document 1: " + context[0]
+        + "\n Document 2: " + context[1]
+        + "\n Document 3: " + context[2]
+        + "\n Answer: "
+    )
+
+    return prompt
+
+def load_local_model():
+    """
+    Load Walert's practical local language model using MLX.
+
+    MLX is used here because it is designed for Apple Silicon and lets
+    us run a quantized model without changing the retrieval system.
+    """
+
+    from mlx_lm import load
+
+    model, tokenizer = load(
+        LOCAL_MODEL_NAME
+    )
+
+    return model, tokenizer
+
+
+def generate_local_answer(
+    question,
+    context,
+    model,
+    tokenizer,
+):
+    """
+    Generate an answer from the same retrieved passages used by Walert.
+
+    This uses the maintained Walert prompt but a smaller (baby) local model.
+    The original Falcon path remains available separately!!
+    """
+
+    from mlx_lm import generate
+    from mlx_lm.sample_utils import (
+        make_logits_processors,
+        make_sampler,
+    )
+
+    prompt = build_prompt(
+        question,
+        context,
+    )
+
+    # The released Walert generator used deterministic generation:
+    # do_sample=False and temperature=0.0.
+    sampler = make_sampler(
+        temp=0.0
+    )
+
+    # Preserve Walert's small repetition penalty.
+    logits_processors = make_logits_processors(
+        repetition_penalty=1.03
+    )
+
+    answer = generate(
+        model,
+        tokenizer,
+        prompt=prompt,
+        max_tokens=100,
+        sampler=sampler,
+        logits_processors=logits_processors,
+        verbose=False,
+    )
+
+    return answer.strip()
+
 
 
 def generate_answer(question, context, pipeline, tokenizer):
-    static_prompt = "Generate an answer to be synthesized with text-to-speech for a virtual assisstant, the answer should be based on the retrieved documents for the following question. If the retrieved documents are not related to the question, then answer NA."
-    prompt_base = static_prompt + "\n Question: " + question + "\n Document 1: " + context[0] + "\n Document 2: " + \
-                  context[1] + "\n Document 3: " + context[2] + '\n Answer: '
+    prompt_base = build_prompt(
+        question,
+        context,
+    )
 
     gen_answer = pipeline(
         prompt_base,
@@ -130,6 +258,35 @@ def generate_answer(question, context, pipeline, tokenizer):
 
     return gen_answer
 
+def inspect_rag(question):
+    """
+    Show what Walert retrieves and what it would send to Falcon c:
+    """
+
+    context = get_context_passages(question)
+
+    prompt = build_prompt(question,context)
+
+    print()
+    print("Question:")
+    print(question)
+
+    print()
+    print("Retrieved passages:")
+
+    for number, passage in enumerate(
+        context,
+        start=1,
+    ):
+        print()
+        print(f"Document {number}:")
+        print(passage)
+
+    print()
+    print("Falcon prompt:")
+    print()
+    print(prompt)
+
 
 # Create a callback function to stop the recording
 def callback(indata, frames, time, status):
@@ -139,10 +296,144 @@ def callback(indata, frames, time, status):
         print("Recording finished.")
         raise sd.CallbackStop
 
-# Create an event for stopping the recording
-EVENT = threading.Event()
+# Created only when the voice assistant is actually started.
+EVENT = None
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+    description="Run or inspect the Walert RAG system."
+    )
+
+    parser.add_argument(
+        "--inspect",
+        metavar="QUESTION",
+        help=(
+            "Retrieve the top three passages and show the Falcon prompt "
+            "without loading Falcon or starting the voice assistant."
+        ),
+    )
+
+    parser.add_argument(
+    "--answer",
+    metavar="QUESTION",
+    help=(
+        "Retrieve Walert's top three passages and generate "
+        "a local text answer."
+    ))
+
+    parser.add_argument(
+    "--chat",
+    action="store_true",
+    help=(
+        "Start an interactive text conversation and keep "
+        "the local language model loaded between questions."
+    ))
+
+    args = parser.parse_args()
+
+    if args.inspect:
+        inspect_rag(
+            args.inspect
+        )
+        raise SystemExit(0)
+
+    if args.answer:
+        question = args.answer
+
+        print()
+        print("Retrieving passages...")
+
+        context, top_score = get_context_passages(question, return_score=True)
+
+        print("Loading local language model...")
+
+        local_model, local_tokenizer = (
+            load_local_model()
+        )
+
+        print("Generating answer...")
+
+        # Only reject questions that are clearly far outside Walert's domain.
+        if top_score < OBVIOUSLY_OFF_DOMAIN_SCORE:
+            answer = "NA"
+        else:
+            answer = generate_local_answer(
+                question,
+                context,
+                local_model,
+                local_tokenizer,
+            )
+
+        print()
+        print("Question:")
+        print(question)
+
+        print()
+        print("Walert answer:")
+        print(answer)
+
+        raise SystemExit(0)
+
+    if args.chat:
+        print()
+        print("Loading Walert local language model...")
+
+        local_model, local_tokenizer = (
+            load_local_model()
+        )
+
+        print()
+        print("Walert is ready c:\nAsk a question or type 'quit' or 'exit' to stop.")
+
+        while True:
+            print()
+
+            question = input("You: ").strip()
+
+            if question.lower() in {
+                "quit",
+                "exit",
+            }:
+                print("Walert: Byeeeee!!")
+                break
+
+            if not question:
+                continue
+
+            context, top_score = get_context_passages(question, return_score=True)
+
+            # Only reject questions that are clearly far outside Walert's domain.
+            if top_score < OBVIOUSLY_OFF_DOMAIN_SCORE:
+                answer = "NA"
+            else:
+                answer = generate_local_answer(
+                    question,
+                    context,
+                    local_model,
+                    local_tokenizer,
+                )
+
+            print()
+            print("Walert:")
+            print(answer)
+
+        raise SystemExit(0)
+
+    # Everything below this point belongs only to the voice interface.
+    # (Text-only RAG should not require audio dependencies.)
+    import sounddevice as sd
+    from scipy.io.wavfile import write
+    import threading
+    from pydub import AudioSegment
+    import numpy as np
+    import whisper
+    import os
+    from gtts import gTTS
+    import pygame
+    import time
+
+    EVENT = threading.Event()
+
     logging.info("Starting the voice assistant...")
     # ************ Query Recording ************
 
@@ -177,6 +468,10 @@ if __name__ == '__main__':
     RAG_context_passages = get_context_passages(question)
 
     logging.info(f"Retrieval Completed")
+    # Falcon is intentionally loaded here rather than at import time.
+    # This lets us test retrieval and prompt construction independently.
+    if PIPELINE is None:
+        PIPELINE, TOKENIZER = load_model(MODEL_NAME)
     # ************ Response Generation in Text ************
     logging.info(f"Initiating response generation using Falcon")
     llm_result = generate_answer(question, RAG_context_passages, PIPELINE, TOKENIZER)
