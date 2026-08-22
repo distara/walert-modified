@@ -18,6 +18,21 @@ Note: This repository contains all utility code for 'Behind The Scenes' of Waler
 
 You will find in **quantitative_eval** folder all the required codes and files to rerun the experiments in the paper. 
 
+## Setup
+
+Install the Python dependencies from the `quantitative_eval` directory:
+
+```bash
+cd quantitative_eval
+python -m pip install -r requirements.txt
+```
+
+The NLG evaluation uses NLTK tokenization for BLEU. Download the required tokenizer data once:
+
+```bash
+python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+```
+
 # Evaluation Results
 NDCG for Known and Inferred Questions
 ![NDCG](Evaluation_results/1.png)
