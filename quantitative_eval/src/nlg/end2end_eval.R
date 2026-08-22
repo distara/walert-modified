@@ -1,5 +1,4 @@
-require(tidyverse)
-require(stringr)
+require(dplyr)
 #Read data
 
 
