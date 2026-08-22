@@ -8,6 +8,7 @@ from pyserini.search.faiss import FaissSearcher
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import transformers
 import torch
+import re
 
 logging.basicConfig(filename='voice_assistant.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -152,11 +153,10 @@ def build_prompt(question, context):
     "Give a direct, concise answer suitable for a virtual assistant. "
     "Do not mention the retrieved documents, the prompt, or that the answer "
     "was synthesized. "
-    "Add one emoticon from this list: "
-    "(>w<, >x<, >.<, TwT, ;-;, T~T, >…<, ^.^, •_•, :p) "
-    "to the very end of the answer. "
+    "Every response must end with exactly one emoticon from this list: "
+    "(>w<, >x<, >.<, TwT, ;-;, T~T, >…<, ^.^, •_•, :p). "
     "If the retrieved documents do not contain enough information to answer "
-    "the question, output exactly NA and nothing else."
+    "the question, answer NA followed by one emoticon from the list."
 )
 
     prompt = (
@@ -232,7 +232,16 @@ def generate_local_answer(
         verbose=False,
     )
 
-    return answer.strip()
+    answer = answer.strip()
+
+    # Small local models do not always follow the requested output format:
+    # they may write an explanation before or after NA. If the model explicitly
+    # chooses NA, preserve that abstention decision instead of returning the
+    # surrounding hallucinated text.
+    if re.search(r"\bNA\b", answer, flags=re.IGNORECASE):
+        return "NA"
+
+    return answer
 
 
 
